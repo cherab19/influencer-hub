@@ -40,7 +40,7 @@ export default function DirectoryPage() {
         .eq("status", "approved")
         .order("subscription_plan", { ascending: false });
 
-      if (category && category !== "all") query = query.eq("category", category);
+      if (category && category !== "all") query = query.eq("category", category as any);
       if (location) query = query.ilike("location", `%${location}%`);
 
       const range = FOLLOWER_RANGES.find(r => r.label === followerRange);
