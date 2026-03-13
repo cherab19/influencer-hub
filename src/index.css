@@ -133,4 +133,7 @@
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+   #lovable-badge {
+  display: none !important;
+}
 }
