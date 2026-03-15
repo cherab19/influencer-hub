@@ -20,6 +20,13 @@ const PLATFORM_ICONS: Record<string, string> = {
 
 export default function InfluencerProfilePage() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const [showContact, setShowContact] = useState(false);
+  const [msgSubject, setMsgSubject] = useState("");
+  const [msgBody, setMsgBody] = useState("");
+  const [sending, setSending] = useState(false);
 
   const { data: influencer, isLoading } = useQuery({
     queryKey: ["influencer-profile", id],
