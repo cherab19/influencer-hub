@@ -323,47 +323,181 @@ function CampaignManager() {
 }
 
 function AdvertiserMessages() {
-  const { user } = useAuth();
-  const { data: messages } = useQuery({
+  const { user, profile } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  const [replyBody, setReplyBody] = useState("");
+  const [newRecipientId, setNewRecipientId] = useState("");
+  const [newBody, setNewBody] = useState("");
+  const [showCompose, setShowCompose] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { data: messages, refetch } = useQuery({
     queryKey: ["adv-messages", user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from("messages").select(`*, sender:profiles!messages_sender_id_fkey(full_name)`).eq("recipient_id", user!.id).order("created_at", { ascending: false });
+      const { data } = await supabase
+        .from("messages")
+        .select(`*, sender:profiles!messages_sender_id_fkey(full_name, avatar_url, user_id)`)
+        .eq("recipient_id", user!.id)
+        .order("created_at", { ascending: false });
       return data || [];
     },
     enabled: !!user,
   });
 
+  // Real-time subscription
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`adv-messages-inbox-${user.id}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "messages",
+        filter: `recipient_id=eq.${user.id}`,
+      }, () => {
+        refetch();
+        toast({ title: "New message!", description: "You have a new message." });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  const openThread = async (senderId: string) => {
+    setSelectedThread(senderId);
+    await supabase
+      .from("messages")
+      .update({ is_read: true })
+      .eq("recipient_id", user!.id)
+      .eq("sender_id", senderId)
+      .eq("is_read", false);
+    queryClient.invalidateQueries({ queryKey: ["adv-messages"] });
+  };
+
+  const sendReply = async () => {
+    if (!replyBody.trim() || !selectedThread) return;
+    await supabase.from("messages").insert({
+      sender_id: user!.id,
+      recipient_id: selectedThread,
+      body: replyBody.trim(),
+    });
+    setReplyBody("");
+    refetch();
+  };
+
+  const threads = messages ? Object.values(
+    messages.reduce((acc: any, msg: any) => {
+      const key = msg.sender?.user_id || msg.sender_id;
+      if (!acc[key]) acc[key] = { sender: msg.sender, messages: [], hasUnread: false };
+      acc[key].messages.push(msg);
+      if (!msg.is_read) acc[key].hasUnread = true;
+      return acc;
+    }, {})
+  ) as any[] : [];
+
+  const threadMessages = selectedThread
+    ? messages?.filter((m: any) => m.sender?.user_id === selectedThread) || []
+    : [];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-foreground">Messages</h1>
-        <p className="text-muted-foreground text-sm">Your inbox</p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-foreground">Messages</h1>
+          <p className="text-muted-foreground text-sm">Real-time conversations with influencers</p>
+        </div>
       </div>
-      {messages && messages.length > 0 ? (
-        <div className="space-y-2">
-          {messages.map((msg: any) => (
-            <div key={msg.id} className={`bg-card rounded-xl border p-4 shadow-card ${!msg.is_read ? "border-primary/30" : "border-border"}`}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold flex-shrink-0">
-                  {msg.sender?.full_name?.charAt(0) || "?"}
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-card" style={{ height: 480 }}>
+        <div className="flex h-full">
+          {/* Thread list */}
+          <div className="w-64 border-r border-border flex flex-col flex-shrink-0">
+            <div className="p-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Inbox</p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {threads.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                  <MessageSquare className="w-8 h-8 text-muted-foreground mb-2" />
+                  <p className="text-xs text-muted-foreground">No messages yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Contact influencers from the directory</p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-foreground">{msg.sender?.full_name || "Unknown"}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(msg.created_at).toLocaleDateString()}</p>
+              )}
+              {threads.map((thread: any) => (
+                <button
+                  key={thread.sender?.user_id}
+                  onClick={() => openThread(thread.sender?.user_id)}
+                  className={`w-full text-left p-3 hover:bg-muted/50 transition-colors border-b border-border/50 ${
+                    selectedThread === thread.sender?.user_id ? "bg-primary/5" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full gradient-hero flex items-center justify-center text-white text-xs font-bold flex-shrink-0 overflow-hidden">
+                      {thread.sender?.avatar_url
+                        ? <img src={thread.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                        : thread.sender?.full_name?.charAt(0) || "?"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-foreground truncate">{thread.sender?.full_name || "Unknown"}</p>
+                        {thread.hasUnread && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">{thread.messages[0]?.body}</p>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground truncate">{msg.body}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Message pane */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {selectedThread ? (
+              <>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {threadMessages.map((msg: any) => {
+                    const isOwn = msg.sender_id === user?.id;
+                    return (
+                      <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-xs rounded-xl px-3 py-2 text-sm ${
+                          isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                        }`}>
+                          <p>{msg.body}</p>
+                          <p className={`text-xs mt-1 ${isOwn ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="p-3 border-t border-border flex gap-2">
+                  <Input
+                    value={replyBody}
+                    onChange={e => setReplyBody(e.target.value)}
+                    placeholder="Type a reply..."
+                    className="flex-1 h-9 text-sm"
+                    onKeyDown={e => e.key === "Enter" && sendReply()}
+                  />
+                  <Button size="sm" onClick={sendReply} disabled={!replyBody.trim()}>
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center p-6">
+                <div>
+                  <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Select a conversation to read</p>
+                  <p className="text-xs text-muted-foreground mt-1">Or contact an influencer from the <Link to="/dashboard/advertiser/find" className="text-primary hover:underline">directory</Link></p>
                 </div>
               </div>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="text-center py-16 bg-card rounded-xl border border-border">
-          <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">No messages yet</p>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
