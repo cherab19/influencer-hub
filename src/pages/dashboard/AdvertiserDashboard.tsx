@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -10,9 +10,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useUnreadMessages } from "@/hooks/useUnreadMessages";
+import AvatarUpload from "@/components/AvatarUpload";
 import {
   LayoutDashboard, Search, Megaphone, MessageSquare,
-  CreditCard, LogOut, Menu, Users, Plus, X
+  CreditCard, LogOut, Menu, Users, Plus, X, Send
 } from "lucide-react";
 import InfluencerCard from "@/components/InfluencerCard";
 
