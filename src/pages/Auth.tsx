@@ -39,7 +39,21 @@ export default function AuthPage() {
       toast({ title: "Login failed", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Welcome back!" });
-      navigate("/");
+      // Redirect based on role after profile loads
+      const redirectByRole = async () => {
+        const { supabase } = await import("@/integrations/supabase/client");
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData.user) return navigate("/");
+        const { data } = await supabase.from("profiles").select("role").eq("user_id", userData.user.id).single();
+        const role = data?.role || "influencer";
+        const routes: Record<string, string> = {
+          influencer: "/dashboard/influencer",
+          advertiser: "/dashboard/advertiser",
+          admin: "/dashboard/admin",
+        };
+        navigate(routes[role] || "/");
+      };
+      redirectByRole();
     }
   };
 
