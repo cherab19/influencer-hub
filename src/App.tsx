@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import DirectoryPage from "./pages/Directory.tsx";
@@ -29,9 +30,30 @@ const App = () => (
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/influencer/:id" element={<InfluencerProfilePage />} />
-            <Route path="/dashboard/influencer/*" element={<InfluencerDashboard />} />
-            <Route path="/dashboard/advertiser/*" element={<AdvertiserDashboard />} />
-            <Route path="/dashboard/admin/*" element={<AdminDashboard />} />
+            <Route
+              path="/dashboard/influencer/*"
+              element={
+                <ProtectedRoute allowedRoles={["influencer"]}>
+                  <InfluencerDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/advertiser/*"
+              element={
+                <ProtectedRoute allowedRoles={["advertiser"]}>
+                  <AdvertiserDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/admin/*"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
