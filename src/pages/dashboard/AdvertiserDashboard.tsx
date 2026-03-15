@@ -30,6 +30,7 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
   const location = useLocation();
   const { signOut, profile } = useAuth();
   const navigate = useNavigate();
+  const unreadCount = useUnreadMessages();
 
   return (
     <aside className={`${mobile ? "w-full" : "w-64 min-h-screen"} bg-sidebar flex flex-col`}>
@@ -41,8 +42,14 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
           <span className="font-display font-bold text-sidebar-foreground">InfluencerHub</span>
         </Link>
         <div className="mt-3 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold">
-            {profile?.full_name?.charAt(0) || "?"}
+          <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt={profile.full_name || ""} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold">
+                {profile?.full_name?.charAt(0) || "?"}
+              </div>
+            )}
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium text-sidebar-foreground truncate">{profile?.full_name}</p>
@@ -53,6 +60,7 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
       <nav className="flex-1 p-3 space-y-0.5">
         {NAV_ITEMS.map((item) => {
           const isActive = item.end ? location.pathname === item.path : location.pathname.startsWith(item.path);
+          const isMessages = item.label === "Messages";
           return (
             <Link key={item.path} to={item.path} onClick={onClose}
               className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
@@ -61,7 +69,12 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
               }`}
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {isMessages && unreadCount > 0 && (
+                <span className="bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
             </Link>
           );
         })}
