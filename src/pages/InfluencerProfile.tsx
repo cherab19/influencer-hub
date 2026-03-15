@@ -118,13 +118,66 @@ export default function InfluencerProfilePage() {
                       </div>
                     )}
                   </div>
-                  <Button className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2">
+                  <Button
+                    onClick={() => {
+                      if (!user) { navigate("/auth"); return; }
+                      setShowContact(true);
+                    }}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2"
+                  >
                     <MessageSquare className="w-4 h-4" />
                     Contact
                   </Button>
                 </div>
               </div>
             </div>
+
+            {/* Contact modal */}
+            {showContact && (
+              <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+                <div className="bg-card rounded-2xl border border-border shadow-lg w-full max-w-md p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-display font-semibold text-foreground">Contact {(influencer as any).profiles?.full_name}</h2>
+                    <button onClick={() => setShowContact(false)} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <Label>Subject</Label>
+                      <Input value={msgSubject} onChange={e => setMsgSubject(e.target.value)} placeholder="Campaign collaboration opportunity" className="mt-1" />
+                    </div>
+                    <div>
+                      <Label>Message</Label>
+                      <Textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} placeholder="Hi! I'd love to collaborate with you on our upcoming campaign..." rows={4} className="mt-1" />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={async () => {
+                          if (!msgBody.trim()) return;
+                          setSending(true);
+                          const { error } = await supabase.from("messages").insert({
+                            sender_id: user!.id,
+                            recipient_id: id!,
+                            subject: msgSubject || null,
+                            body: msgBody,
+                          });
+                          setSending(false);
+                          if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+                          toast({ title: "Message sent!", description: "Your message has been sent to the influencer." });
+                          setShowContact(false);
+                          setMsgSubject("");
+                          setMsgBody("");
+                        }}
+                        disabled={!msgBody.trim() || sending}
+                        className="flex-1"
+                      >
+                        {sending ? "Sending..." : "Send Message"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setShowContact(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Left: Bio + Platforms */}
