@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -10,9 +10,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useUnreadMessages } from "@/hooks/useUnreadMessages";
+import AvatarUpload from "@/components/AvatarUpload";
 import {
   LayoutDashboard, Search, Megaphone, MessageSquare,
-  CreditCard, LogOut, Menu, Users, Plus, X
+  CreditCard, LogOut, Menu, Users, Plus, X, Send
 } from "lucide-react";
 import InfluencerCard from "@/components/InfluencerCard";
 
@@ -28,6 +30,7 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
   const location = useLocation();
   const { signOut, profile } = useAuth();
   const navigate = useNavigate();
+  const unreadCount = useUnreadMessages();
 
   return (
     <aside className={`${mobile ? "w-full" : "w-64 min-h-screen"} bg-sidebar flex flex-col`}>
@@ -39,8 +42,14 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
           <span className="font-display font-bold text-sidebar-foreground">InfluencerHub</span>
         </Link>
         <div className="mt-3 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold">
-            {profile?.full_name?.charAt(0) || "?"}
+          <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt={profile.full_name || ""} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold">
+                {profile?.full_name?.charAt(0) || "?"}
+              </div>
+            )}
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium text-sidebar-foreground truncate">{profile?.full_name}</p>
@@ -51,6 +60,7 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
       <nav className="flex-1 p-3 space-y-0.5">
         {NAV_ITEMS.map((item) => {
           const isActive = item.end ? location.pathname === item.path : location.pathname.startsWith(item.path);
+          const isMessages = item.label === "Messages";
           return (
             <Link key={item.path} to={item.path} onClick={onClose}
               className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-colors ${isActive
@@ -59,7 +69,12 @@ function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () => void }
               }`}
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {isMessages && unreadCount > 0 && (
+                <span className="bg-primary text-primary-foreground text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -308,57 +323,203 @@ function CampaignManager() {
 }
 
 function AdvertiserMessages() {
-  const { user } = useAuth();
-  const { data: messages } = useQuery({
+  const { user, profile } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  const [replyBody, setReplyBody] = useState("");
+  const [newRecipientId, setNewRecipientId] = useState("");
+  const [newBody, setNewBody] = useState("");
+  const [showCompose, setShowCompose] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { data: messages, refetch } = useQuery({
     queryKey: ["adv-messages", user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from("messages").select(`*, sender:profiles!messages_sender_id_fkey(full_name)`).eq("recipient_id", user!.id).order("created_at", { ascending: false });
+      const { data } = await supabase
+        .from("messages")
+        .select(`*, sender:profiles!messages_sender_id_fkey(full_name, avatar_url, user_id)`)
+        .eq("recipient_id", user!.id)
+        .order("created_at", { ascending: false });
       return data || [];
     },
     enabled: !!user,
   });
 
+  // Real-time subscription
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`adv-messages-inbox-${user.id}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "messages",
+        filter: `recipient_id=eq.${user.id}`,
+      }, () => {
+        refetch();
+        toast({ title: "New message!", description: "You have a new message." });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  const openThread = async (senderId: string) => {
+    setSelectedThread(senderId);
+    await supabase
+      .from("messages")
+      .update({ is_read: true })
+      .eq("recipient_id", user!.id)
+      .eq("sender_id", senderId)
+      .eq("is_read", false);
+    queryClient.invalidateQueries({ queryKey: ["adv-messages"] });
+  };
+
+  const sendReply = async () => {
+    if (!replyBody.trim() || !selectedThread) return;
+    await supabase.from("messages").insert({
+      sender_id: user!.id,
+      recipient_id: selectedThread,
+      body: replyBody.trim(),
+    });
+    setReplyBody("");
+    refetch();
+  };
+
+  const threads = messages ? Object.values(
+    messages.reduce((acc: any, msg: any) => {
+      const key = msg.sender?.user_id || msg.sender_id;
+      if (!acc[key]) acc[key] = { sender: msg.sender, messages: [], hasUnread: false };
+      acc[key].messages.push(msg);
+      if (!msg.is_read) acc[key].hasUnread = true;
+      return acc;
+    }, {})
+  ) as any[] : [];
+
+  const threadMessages = selectedThread
+    ? messages?.filter((m: any) => m.sender?.user_id === selectedThread) || []
+    : [];
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-foreground">Messages</h1>
-        <p className="text-muted-foreground text-sm">Your inbox</p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-foreground">Messages</h1>
+          <p className="text-muted-foreground text-sm">Real-time conversations with influencers</p>
+        </div>
       </div>
-      {messages && messages.length > 0 ? (
-        <div className="space-y-2">
-          {messages.map((msg: any) => (
-            <div key={msg.id} className={`bg-card rounded-xl border p-4 shadow-card ${!msg.is_read ? "border-primary/30" : "border-border"}`}>
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-accent flex items-center justify-center text-accent-foreground text-xs font-bold flex-shrink-0">
-                  {msg.sender?.full_name?.charAt(0) || "?"}
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-card" style={{ height: 480 }}>
+        <div className="flex h-full">
+          {/* Thread list */}
+          <div className="w-64 border-r border-border flex flex-col flex-shrink-0">
+            <div className="p-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Inbox</p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {threads.length === 0 && (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                  <MessageSquare className="w-8 h-8 text-muted-foreground mb-2" />
+                  <p className="text-xs text-muted-foreground">No messages yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Contact influencers from the directory</p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-foreground">{msg.sender?.full_name || "Unknown"}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(msg.created_at).toLocaleDateString()}</p>
+              )}
+              {threads.map((thread: any) => (
+                <button
+                  key={thread.sender?.user_id}
+                  onClick={() => openThread(thread.sender?.user_id)}
+                  className={`w-full text-left p-3 hover:bg-muted/50 transition-colors border-b border-border/50 ${
+                    selectedThread === thread.sender?.user_id ? "bg-primary/5" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full gradient-hero flex items-center justify-center text-white text-xs font-bold flex-shrink-0 overflow-hidden">
+                      {thread.sender?.avatar_url
+                        ? <img src={thread.sender.avatar_url} alt="" className="w-full h-full object-cover" />
+                        : thread.sender?.full_name?.charAt(0) || "?"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-foreground truncate">{thread.sender?.full_name || "Unknown"}</p>
+                        {thread.hasUnread && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">{thread.messages[0]?.body}</p>
+                    </div>
                   </div>
-                  <p className="text-sm text-muted-foreground truncate">{msg.body}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Message pane */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {selectedThread ? (
+              <>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {threadMessages.map((msg: any) => {
+                    const isOwn = msg.sender_id === user?.id;
+                    return (
+                      <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-xs rounded-xl px-3 py-2 text-sm ${
+                          isOwn ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+                        }`}>
+                          <p>{msg.body}</p>
+                          <p className={`text-xs mt-1 ${isOwn ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="p-3 border-t border-border flex gap-2">
+                  <Input
+                    value={replyBody}
+                    onChange={e => setReplyBody(e.target.value)}
+                    placeholder="Type a reply..."
+                    className="flex-1 h-9 text-sm"
+                    onKeyDown={e => e.key === "Enter" && sendReply()}
+                  />
+                  <Button size="sm" onClick={sendReply} disabled={!replyBody.trim()}>
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center p-6">
+                <div>
+                  <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Select a conversation to read</p>
+                  <p className="text-xs text-muted-foreground mt-1">Or contact an influencer from the <Link to="/dashboard/advertiser/find" className="text-primary hover:underline">directory</Link></p>
                 </div>
               </div>
-            </div>
-          ))}
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="text-center py-16 bg-card rounded-xl border border-border">
-          <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">No messages yet</p>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
 function Billing() {
+  const { user, profile, refreshProfile } = useAuth();
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-bold text-foreground">Billing</h1>
-        <p className="text-muted-foreground text-sm">Manage payments and invoices</p>
+        <h1 className="font-display text-2xl font-bold text-foreground">Billing & Account</h1>
+        <p className="text-muted-foreground text-sm">Manage payments and your profile photo</p>
+      </div>
+      {/* Avatar section */}
+      <div className="bg-card rounded-xl border border-border p-6 shadow-card">
+        <h2 className="font-display font-semibold text-foreground mb-4">Profile Photo</h2>
+        <div className="flex items-center gap-4">
+          <AvatarUpload userId={user?.id} currentAvatar={profile?.avatar_url} onUploaded={refreshProfile} size="lg" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Upload a company logo or photo</p>
+            <p className="text-xs text-muted-foreground mt-1">Click the photo to upload. JPG, PNG or WebP. Max 5MB.</p>
+          </div>
+        </div>
       </div>
       <div className="bg-card rounded-xl border border-border p-8 text-center shadow-card">
         <CreditCard className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
