@@ -1,12 +1,18 @@
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import PublicNav from "@/components/PublicNav";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, MapPin, Star, MessageSquare, DollarSign } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { CheckCircle, MapPin, Star, MessageSquare, DollarSign, X } from "lucide-react";
 import { formatFollowers } from "@/components/InfluencerCard";
 import { Link } from "react-router-dom";
+import { useState } from "react";
 
 const PLATFORM_ICONS: Record<string, string> = {
   tiktok: "🎵", instagram: "📸", youtube: "▶️", facebook: "👍", twitter: "🐦", telegram: "✈️",
