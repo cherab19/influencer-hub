@@ -503,11 +503,23 @@ function AdvertiserMessages() {
 }
 
 function Billing() {
+  const { user, profile, refreshProfile } = useAuth();
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-2xl font-bold text-foreground">Billing</h1>
-        <p className="text-muted-foreground text-sm">Manage payments and invoices</p>
+        <h1 className="font-display text-2xl font-bold text-foreground">Billing & Account</h1>
+        <p className="text-muted-foreground text-sm">Manage payments and your profile photo</p>
+      </div>
+      {/* Avatar section */}
+      <div className="bg-card rounded-xl border border-border p-6 shadow-card">
+        <h2 className="font-display font-semibold text-foreground mb-4">Profile Photo</h2>
+        <div className="flex items-center gap-4">
+          <AvatarUpload userId={user?.id} currentAvatar={profile?.avatar_url} onUploaded={refreshProfile} size="lg" />
+          <div>
+            <p className="text-sm font-medium text-foreground">Upload a company logo or photo</p>
+            <p className="text-xs text-muted-foreground mt-1">Click the photo to upload. JPG, PNG or WebP. Max 5MB.</p>
+          </div>
+        </div>
       </div>
       <div className="bg-card rounded-xl border border-border p-8 text-center shadow-card">
         <CreditCard className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
